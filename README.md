@@ -44,3 +44,4 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - **GET** `/api/health` — Sistem durumu
 - **WS** `/ws` — Dashboard için anlık güncelleme akışı
 # bas-anommaly-bot
+# bas-anommaly-bot
