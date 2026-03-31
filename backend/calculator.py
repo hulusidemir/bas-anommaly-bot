@@ -46,15 +46,23 @@ class Calculator:
             # 2) Canlı Projeksiyon (Normal Süre)
             live_projection = ppm * total_minutes
 
+            # ── Crunch Time (Taktik Faul) Eklentisi ──
+            # Son çeyrekte ve maçın son 3 dakikasında serbest atışlardan dolayı skor ağırlığı artar.
+            if raw.quarter >= 4 and remaining <= 3.0 and remaining > 0:
+                crunch_inflation = remaining * 1.5  # Kalan her dakika için ekstra 1.5 sayı bekliyoruz
+                live_projection += crunch_inflation
+
             # ── Güvenlik Duvarı 2: Eksik barem koruması ─────────────────
             # opening_line veya live_line 0 ise barem hesaplaması yapılamaz.
             has_opening = raw.opening_line > 0.0
             has_live = raw.live_line > 0.0
 
             # 3) Adil Barem (Fair Value)
-            #    %60 canlı projeksiyon  +  %40 açılış baremi
+            #    Time-Decay: Geride kalan süreye göre ağırlıklar dinamik değişir (Maç sonuna doğru canlı veriye daha çok güvenilir).
             if has_opening:
-                fair_value = (live_projection * 0.6) + (raw.opening_line * 0.4)
+                weight_live = elapsed / total_minutes
+                weight_open = 1.0 - weight_live
+                fair_value = (live_projection * weight_live) + (raw.opening_line * weight_open)
             else:
                 fair_value = live_projection  # Açılış baremi yoksa sadece proj kullan
 

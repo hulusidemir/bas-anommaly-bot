@@ -6,7 +6,7 @@ function getSignalInfo(match) {
   const { signal, delta, fair_value, live_line, live_total_odds } = match;
 
   const liveLine = live_line ?? live_total_odds ?? 0;
-  const gap = Math.abs((fair_value ?? 0) - liveLine);
+  const gap = liveLine > 0 ? Math.abs((fair_value ?? 0) - liveLine) : 0;
 
   if (signal === "PACE_DROP") {
     return { icon: TrendingDown, color: "text-red", bg: "bg-red/10", label: "Aşırı Hız" };

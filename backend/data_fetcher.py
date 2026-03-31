@@ -11,6 +11,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
+import difflib
 from typing import List
 
 from curl_cffi import requests as cffi_requests
@@ -37,6 +39,9 @@ _QUARTER_MAP = {
 class DataFetcher:
     """Canlı maç verilerini SofaScore API'sinden çeker (curl_cffi + Chrome impersonate)."""
 
+    def __init__(self):
+        self.scraper = OddsScraper()
+
     async def close(self) -> None:
         pass  # curl_cffi oturum yönetimi gerektirmez
 
@@ -45,6 +50,7 @@ class DataFetcher:
     async def fetch_live_matches(self) -> List[MatchRaw]:
         """SofaScore'dan canlı basketbol maçlarını çeker."""
         try:
+            await self.scraper.fetch_odds()
             return await self._fetch_sofascore()
         except Exception:
             logger.exception("Canlı veri çekilemedi — boş liste dönüyor.")
@@ -77,14 +83,14 @@ class DataFetcher:
         logger.info("SofaScore'dan %d canlı maç çekildi.", len(matches))
         return matches
 
-    @staticmethod
-    def _parse_event(event: dict) -> MatchRaw | None:
+    def _parse_event(self, event: dict) -> MatchRaw | None:
         status = event.get("status", {})
         if status.get("type") != "inprogress":
             return None
 
         event_id = event.get("id")
         slug = event.get("slug", "")
+        custom_id = event.get("customId", "")
         home = event.get("homeTeam", {}).get("name", "?")
         away = event.get("awayTeam", {}).get("name", "?")
 
@@ -129,19 +135,22 @@ class DataFetcher:
                 elapsed_minutes = parsed
 
         # SofaScore URL
-        sofascore_url = f"https://www.sofascore.com/{slug}/{event_id}" if slug else ""
+        if slug and custom_id:
+            sofascore_url = f"https://www.sofascore.com/{slug}/{custom_id}#id:{event_id}"
+        elif slug:
+            sofascore_url = f"https://www.sofascore.com/{slug}/{event_id}"
+        else:
+            sofascore_url = ""
 
         # elapsed_minutes'ı en az 0.1 yap
         if elapsed_minutes < 0.1:
             elapsed_minutes = 0.1
 
-        # ── Sentetik Odds (Bahis Baremi) Hesaplama ──────────────────────
-        # SofaScore bahis verisi sağlamıyor. Maça dayalı makul bir açılış
-        # ve canlı barem üretiyoruz.
+        # ── Açılış Baremi (Opening Line) Sağlanması ──────────────────────
+        # Kullanıcı tercihi doğrultusunda canlı barem scraping kaldırılmış, sadece Time-Decay hesaplaması 
+        # için açılış baremi oluşturulacak şekilde düzenlenmiştir.
         total_score = home_score + away_score
-        opening_line, live_line = _estimate_odds(
-            event_id, total_score, elapsed_minutes, total_minutes
-        )
+        opening_line, live_line = self.scraper.get_odds(home, away, total_minutes)
 
         return MatchRaw(
             match_id=str(event_id),
@@ -158,43 +167,35 @@ class DataFetcher:
         )
 
 
-# ── Sentetik Odds Üretici ────────────────────────────────────────────────────
+# ── Odds Scraper (Açılış Baremi Fallback) ──────────────────────────────────────────────────
 
-# Maç bazında sabit opening_line cache'i (aynı maç her yenilemede aynı açılışı alsın)
-_opening_cache: dict[int, float] = {}
+_opening_cache: dict[str, float] = {}
 
-
-def _estimate_odds(
-    event_id: int, total_score: int, elapsed: float, total_minutes: float
-) -> tuple[float, float]:
+class OddsScraper:
     """
-    SofaScore odds verisi sağlamadığı için, mevcut skor ve tempoya dayalı
-    sentetik opening_line ve live_line üretir.
-
-    opening_line: lig ortalamasına ±küçük sapma (maç başına SABİT).
-    live_line:    mevcut PPM projeksiyonuna ±küçük bahisçi marjı.
+    Canlı barem scraping işlemi kullanıcı kararıyla veya erişim engeli sebebiyle kaldırıldı.
+    Ancak 'Time-Decay' (Fair Value) ve 'Pace Drop' kurallarının çalışabilmesi için 
+    maçın pre-match (açılış) baremine ihtiyaç vardır.
+    Bu sınıf, takım isimlerini alarak deterministik ve kalıcı bir açılış baremi üretir.
+    Canlı barem her zaman 0.0 döner.
     """
-    # Lig ortalaması bazlı opening_line
-    if total_minutes >= 48:
-        league_avg = 220.0
-    else:
-        league_avg = 155.0
+    def __init__(self):
+        pass
 
-    # Maç başına sabit opening_line (cache'den al veya üret)
-    if event_id not in _opening_cache:
-        rng = random.Random(event_id)  # deterministic seed per match
-        _opening_cache[event_id] = round(league_avg + rng.uniform(-8.0, 8.0), 1)
-    opening_line = _opening_cache[event_id]
+    async def fetch_odds(self):
+        # Scraping kapatıldı.
+        pass
 
-    # Canlı barem: mevcut tempoya dayalı projeksiyon ± bahisçi marjı
-    if elapsed > 1.0 and total_score > 0:
-        ppm = total_score / elapsed
-        projection = ppm * total_minutes
-        # Bahisçi marjı: hafif deterministik offset (aynı skor aynı marj)
-        rng_live = random.Random(event_id + total_score)
-        margin = rng_live.uniform(-3.0, 3.0)
-        live_line = round(projection + margin, 1)
-    else:
-        live_line = opening_line
-
-    return opening_line, live_line
+    def get_odds(self, home: str, away: str, total_minutes: float) -> tuple[float, float]:
+        key = f"{home}-{away}".lower()
+        
+        if key not in _opening_cache:
+            # Lig süresine göre temel toplam (NBA: 220, Avrupa/FIBA: 160)
+            base_total = 220.0 if total_minutes >= 48.0 else 160.0
+            rng = random.Random(key)  # Aynı maça hep aynı açılış baremini vermek için
+            _opening_cache[key] = round(base_total + rng.uniform(-12.0, 12.0), 1)
+            
+        opening_line = _opening_cache[key]
+        live_line = 0.0  # Canlı barem zorunluluğu kaldırıldı
+            
+        return opening_line, live_line

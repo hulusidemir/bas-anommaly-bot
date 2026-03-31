@@ -55,14 +55,14 @@ class AnomalyDetector:
         ppm_t < ppm_t-1 < ppm_t-2  ise True döner.
         Yeterli veri yoksa False döner (bildirim engellenir).
         """
-        ppm_values: List[float] = await db.get_recent_ppm(match_id, limit=3)
+        # Eskiden 3 (90 saniye) olan limit, daha sağlam bir trend için 6'ya (3 dakika) çıkarıldı
+        ppm_values: List[float] = await db.get_recent_ppm(match_id, limit=6)
 
-        if len(ppm_values) < 3:
+        if len(ppm_values) < 6:
             return False
 
-        # ppm_values sırası: [en_yeni, orta, en_eski]
-        ppm_t, ppm_t1, ppm_t2 = ppm_values[0], ppm_values[1], ppm_values[2]
-        return ppm_t < ppm_t1 < ppm_t2
+        # İstikrarlı düşüş trendi: en_yeni < ... < en_eski
+        return all(ppm_values[i] < ppm_values[i+1] for i in range(len(ppm_values) - 1))
 
     # ── Kural 1: Pace Drop Anomaly ───────────────────────────────────────
 
@@ -70,19 +70,17 @@ class AnomalyDetector:
         self, a: MatchAnalysis, raw: MatchRaw
     ) -> MatchAnalysis | None:
         """
-        Eğer canlı projeksiyon, açılış bareminden ≥15 sayı fazlaysa
-        VE 1. veya 2. çeyrek bitimiyse → PACE_DROP.
-        Trend doğrulaması geçerse bildirim onaylanır.
+        Eğer canlı projeksiyon, açılış bareminden ≥ threshold fazla ise Pace Drop hesaplanır.
+        Açılış baremi çekilememişse kural iptal edilir.
         """
+        if a.opening_line <= 0.0:
+            return None
+
         threshold = settings.pace_drop_threshold
         overshoot = a.live_projection - a.opening_line
 
-        q_duration = a.total_minutes / 4
-        is_q_end = raw.quarter in (1, 2) and self._near_quarter_end(
-            a.elapsed_minutes, raw.quarter, q_duration
-        )
-
-        if overshoot >= threshold and is_q_end:
+        # Çeyrek bitim zorunluluğunu (is_q_end) tamamen kaldırıyoruz, trend hareketli pencere (rolling window) ile maç genelinde de yakalanabilir.
+        if overshoot >= threshold:
             if not await self._confirm_declining_ppm(a.match_id):
                 logger.info(
                     "Kural 1 tetiklendi ama PPM trendi doğrulanamadı → gürültü: %s",
@@ -103,10 +101,12 @@ class AnomalyDetector:
 
     async def _rule_value_gap(self, a: MatchAnalysis) -> MatchAnalysis | None:
         """
-        Adil barem ile şirket canlı baremi arasında
-        ≥8.5 sayı fark varsa → VALUE_GAP.
-        Trend doğrulaması geçerse bildirim onaylanır.
+        Adil barem ile şirket canlı baremi arasındaki fark threshold'u aşarsa.
+        Canlı barem çekilememişse işlem iptal edilir.
         """
+        if a.live_line <= 0.0:
+            return None
+
         threshold = settings.value_delta_threshold
         gap = abs(a.fair_value - a.live_line)
 

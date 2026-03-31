@@ -37,7 +37,9 @@ export default function MatchTable({ matches }) {
             const ppm = m.ppm ?? m.current_ppm ?? 0;
             const target = m.target_ppm ?? null;
             const fairVal = m.fair_value ?? 0;
-            const deltaAbs = Math.abs(fairVal - liveLine);
+            const deltaAbs = liveLine > 0 ? Math.abs(fairVal - liveLine) : 0;
+            const deltaSign = (fairVal - liveLine) >= 0 ? "+" : "";
+            const deltaRender = liveLine > 0 ? `${deltaSign}${fmt(fairVal - liveLine)}` : "—";
             const matchName = m.match_name ?? `${m.home_team ?? "?"} vs ${m.away_team ?? "?"}`;
             const timeDisplay = m.quarter_display ?? `${fmt(m.elapsed_minutes ?? m.played_minutes, 0)} dk`;
             const sofascoreUrl = m.sofascore_url || null;
@@ -92,7 +94,7 @@ export default function MatchTable({ matches }) {
                 {/* Delta */}
                 <td className="px-4 py-3 text-center font-mono">
                   <span className={deltaAbs > 8.5 ? "text-amber font-semibold" : "text-text-secondary"}>
-                    {(fairVal - liveLine) >= 0 ? "+" : ""}{fmt(fairVal - liveLine)}
+                    {deltaRender}
                   </span>
                 </td>
 

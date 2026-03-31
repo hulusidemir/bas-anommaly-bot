@@ -23,8 +23,8 @@ class Settings:
     data_fetch_interval_sec: int = int(os.getenv("DATA_FETCH_INTERVAL", "30"))
 
     # --- Anomali Eşik Değerleri ---
-    pace_drop_threshold: float = float(os.getenv("PACE_DROP_THRESHOLD", "15"))
-    value_delta_threshold: float = float(os.getenv("VALUE_DELTA_THRESHOLD", "8.5"))
+    pace_drop_threshold: float = float(os.getenv("PACE_DROP_THRESHOLD", "8.5"))
+    value_delta_threshold: float = float(os.getenv("VALUE_DELTA_THRESHOLD", "3.5"))
     drought_points_threshold: int = int(os.getenv("DROUGHT_POINTS_THRESHOLD", "4"))
     drought_minutes_window: int = int(os.getenv("DROUGHT_MINUTES_WINDOW", "3"))
     drought_ppm_ratio: float = float(os.getenv("DROUGHT_PPM_RATIO", "1.4"))
